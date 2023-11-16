@@ -43,7 +43,7 @@ class VideoReader(Dataset):
         use_all_mask - when true, read all available mask in mask_dir.
             Default false. Set to true for YouTubeVOS validation.
         """
-        self.vid_name = vid_name
+        # self.vid_name = vid_name
         self.video_path = video_path
         self.mask_dir = mask_dir
         self.to_save = to_save
@@ -64,10 +64,11 @@ class VideoReader(Dataset):
                 transforms.Resize(size, interpolation=InterpolationMode.BILINEAR),
             ])
         self.size = size
-
-        if os.path.isfile(self.video_path):
+        self.ori_size = False
+        self.vid_name = path.splitext(path.basename(self.video_path))[0]
+        if path.isfile(self.video_path):
             self.tmp_dir = TemporaryDirectory()
-            self.image_dir = self.tmp_dir.name
+            self.image_dir = path.join(mask_dir.split('/')[0], self.vid_name, 'images') #self.tmp_dir.name
             self._extract_frames()
         else:
             self.image_dir = video_path
@@ -84,13 +85,20 @@ class VideoReader(Dataset):
         frame_name = self.frames[idx]
         im_path = path.join(self.image_dir, frame_name)
         img = Image.open(im_path).convert('RGB')
+        if self.size > 0:
+            w, h = img.size      
+            new_w = (w*self.size//min(w, h))
+            new_h = (h*self.size//min(w, h))
+            if new_w != w or new_h != h:
+                img = img.resize((new_w, new_h))
+                shape = img.size[::-1]
 
-        if self.image_dir == self.size_dir:
-            shape = np.array(img).shape[:2]
-        else:
-            size_path = path.join(self.size_dir, frame_name)
-            size_im = Image.open(size_path).convert('RGB')
-            shape = np.array(size_im).shape[:2]
+        # if self.image_dir == self.size_dir:
+        #     shape = np.array(img).shape[:2]
+        # else:
+        #     size_path = path.join(self.size_dir, frame_name)
+        #     size_im = Image.open(size_path).convert('RGB')
+        #     shape = np.array(size_im).shape[:2]
 
         gt_path = path.join(self.mask_dir, frame_name[:-4]+'.png')
         if not os.path.exists(gt_path):
@@ -126,24 +134,29 @@ class VideoReader(Dataset):
 
     def _extract_frames(self):
         cap = cv2.VideoCapture(self.video_path)
+        self.ori_size = (int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT)), int(cap.get(cv2.CAP_PROP_FRAME_WIDTH)))
+        self.fps = cap.get(cv2.CAP_PROP_FPS)
+        total_frame_count = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
         frame_index = 0
-        print(f'Extracting frames from {self.video_path} into a temporary dir...')
-        bar = progressbar.ProgressBar(max_value=int(cap.get(cv2.CAP_PROP_FRAME_COUNT)))
-        while(cap.isOpened()):
-            _, frame = cap.read()
-            if frame is None:
-                break
-            if self.size > 0:
-                h, w = frame.shape[:2]
-                new_w = (w*self.size//min(w, h))
-                new_h = (h*self.size//min(w, h))
-                if new_w != w or new_h != h:
-                    frame = cv2.resize(frame,dsize=(new_w,new_h),interpolation=cv2.INTER_AREA)
-            cv2.imwrite(path.join(self.image_dir, f'frame_{frame_index:06d}.jpg'), frame)
-            frame_index += 1
-            bar.update(frame_index)
-        bar.finish()
-        print('Done!')
+        os.makedirs(self.image_dir, exist_ok=True)
+        if total_frame_count != len(os.listdir(self.image_dir)):
+            print(f'Extracting frames from {self.video_path} into a temporary dir...')
+            bar = progressbar.ProgressBar(max_value=int(cap.get(cv2.CAP_PROP_FRAME_COUNT)))
+            while(cap.isOpened()):
+                _, frame = cap.read()
+                if frame is None:
+                    break
+                # if self.size > 0:
+                #     h, w = frame.shape[:2]      
+                #     new_w = (w*self.size//min(w, h))
+                #     new_h = (h*self.size//min(w, h))
+                #     if new_w != w or new_h != h:
+                #         frame = cv2.resize(frame,dsize=(new_w,new_h),interpolation=cv2.INTER_AREA)
+                cv2.imwrite(path.join(self.image_dir, f'frame_{frame_index:06d}.jpg'), frame)
+                frame_index += 1
+                bar.update(frame_index)
+            bar.finish()
+            print('Done!')
     
 
     def resize_mask(self, mask):

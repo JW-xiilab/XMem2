@@ -36,6 +36,7 @@ def _inference_on_video(frames_with_masks, imgs_in_path, masks_in_path, masks_ou
                         augment_images_with_masks=False,
                         overwrite_config: dict = None,
                         save_overlay=True,
+                        vid_save=False,
                         object_color_if_single_object=(255, 255, 255), 
                         print_fps=False,
                         image_saving_max_queue_size=200):
@@ -127,12 +128,13 @@ def _inference_on_video(frames_with_masks, imgs_in_path, masks_in_path, masks_ou
                 if config['save_masks']:
                     out_mask = mapper.remap_index_mask(out_mask)
                     out_img = Image.fromarray(out_mask)
-                    out_img = vid_reader.map_the_colors_back(out_img)
+                    out_img = vid_reader.map_the_colors_back(out_img.resize(vid_reader.ori_size[::-1]))
 
                     im_saver.save_mask(mask=out_img, frame_name=sample.frame)
 
                     if save_overlay:
-                        original_img = sample.raw_image_pil
+                        original_img = path.join(vid_reader.image_dir, sample.frame)
+                        original_img = Image.open(original_img).convert('RGB')
                         im_saver.save_overlay(orig_img=original_img, mask=out_img, frame_name=sample.frame)
         im_saver.wait_for_jobs_to_finish(verbose=True)
 
@@ -142,6 +144,23 @@ def _inference_on_video(frames_with_masks, imgs_in_path, masks_in_path, masks_ou
         print(f"TOTAL TIME (excluding image saving): {total_preloading_time + total_processing_time:.4f}s")
         print(f"TOTAL PROCESSING FPS: {len(loader) / total_processing_time:.4f}")
         print(f"TOTAL FPS (excluding image saving): {len(loader) / (total_preloading_time + total_processing_time):.4f}")
+    
+    if vid_save:
+        print('Saving Video')
+        import subprocess
+        out_root = path.join(config['masks_out_path'], vid_name)
+        command = [
+            'ffmpeg',
+            '-y',
+            '-framerate', f'{vid_reader.fps}',
+            '-pattern_type', 'glob',
+            '-i', f'{path.join(out_root, "overlay")}/*.jpg',
+            '-c:v', 'libx264',
+            '-pix_fmt', 'yuv420p',
+            '-vf', 'scale=852:trunc(ow/a/2)*2',
+            path.join(out_root ,f'{vid_name}.mp4')
+        ]
+        subprocess.run(command)
 
     return pd.DataFrame(stats)
 
