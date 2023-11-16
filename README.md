@@ -1,3 +1,7 @@
+# KJW
+TODO: 
+* ADD SAM-HQ
+
 # XMem++
 
 ## Production-level Video Segmentation From Few Annotated Frames
