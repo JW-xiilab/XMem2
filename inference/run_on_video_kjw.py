@@ -24,12 +24,11 @@ from util.configuration import VIDEO_INFERENCE_CONFIG
 from util.image_saver import ParallelImageSaver, create_overlay, save_image
 from util.tensor_util import compute_array_iou
 from inference.inference_core import InferenceCore
-from inference.data.video_reader import Sample, VideoReader
+from inference.data.video_reader_kjw import Sample, VideoReader
 from inference.data.mask_mapper import MaskMapper
 from inference.frame_selection.frame_selection_utils import extract_keys, get_determenistic_augmentations
 
-
-def _inference_on_video(frames_with_masks, imgs_in_path, masks_in_path, masks_out_path,
+def _inference_on_video(frames_with_masks, imgs_in_path, mask_in, masks_out_path,
                         original_memory_mechanism=False,
                         compute_iou=False, 
                         manually_curated_masks=False, 
@@ -51,7 +50,7 @@ def _inference_on_video(frames_with_masks, imgs_in_path, masks_in_path, masks_ou
     overwrite_config['masks_out_path'] = masks_out_path
     config.update(overwrite_config)
 
-    mapper, processor, vid_reader, loader = _load_main_objects(imgs_in_path, masks_in_path, config)
+    mapper, processor, vid_reader, loader = _load_main_objects(imgs_in_path, mask_in, config)
     vid_name = vid_reader.vid_name
     vid_length = len(loader)
 
@@ -165,7 +164,7 @@ def _inference_on_video(frames_with_masks, imgs_in_path, masks_in_path, masks_ou
 
     return pd.DataFrame(stats)
 
-def _load_main_objects(imgs_in_path, masks_in_path, config):
+def _load_main_objects(imgs_in_path, mask_in, config):
     device = 'cuda' if torch.cuda.is_available() else 'cpu'
     model_path = config['model']
     network = XMem(config, model_path, pretrained_key_encoder=False, pretrained_value_encoder=False).to(device).eval()
@@ -178,7 +177,7 @@ def _load_main_objects(imgs_in_path, masks_in_path, config):
     mapper = MaskMapper()
     processor = InferenceCore(network, config=config)
 
-    vid_reader, loader = _create_dataloaders(imgs_in_path, masks_in_path, config)
+    vid_reader, loader = _create_dataloaders(imgs_in_path, mask_in, config)
     return mapper,processor,vid_reader,loader
 
 
@@ -193,11 +192,12 @@ def _post_process(sample, prob):
     return out_mask
 
 
-def _create_dataloaders(imgs_in_path: Union[str, PathLike], masks_in_path: Union[str, PathLike], config: dict):
+def _create_dataloaders(imgs_in_path: Union[str, PathLike], mask_in: Union[str, PathLike], config: dict):
     vid_reader = VideoReader(
         "",
         imgs_in_path,  # f'/home/maksym/RESEARCH/VIDEOS/thanks_no_ears_5_annot/JPEGImages',
-        masks_in_path,  # f'/home/maksym/RESEARCH/VIDEOS/thanks_no_ears_5_annot/Annotations_binarized_two_face',
+        mask_in,  # f'/home/maksym/RESEARCH/VIDEOS/thankss_no_ears_5_annot/Annotations_binarized_two_face',
+        out_dir=config['masks_out_path'],
         size=config['size'],
         use_all_masks=True
     )
@@ -266,7 +266,7 @@ def _preload_permanent_memory(frames_to_put_in_permanent_memory: List[int], vid_
 
 def run_on_video(
     imgs_in_path: Union[str, PathLike],
-    masks_in_path: Union[str, PathLike],
+    mask_in: Union[str, PathLike],
     masks_out_path: Union[str, PathLike],
     frames_with_masks: Iterable[int] = (0, ),
     compute_iou=False,
@@ -293,7 +293,7 @@ def run_on_video(
 
     return _inference_on_video(
         imgs_in_path=imgs_in_path,
-        masks_in_path=masks_in_path,
+        mask_in=mask_in,
         masks_out_path=masks_out_path,
         frames_with_masks=frames_with_masks,
         compute_iou=compute_iou,
@@ -302,89 +302,89 @@ def run_on_video(
     )
 
 
-def select_k_next_best_annotation_candidates(
-    imgs_in_path: Union[str, PathLike],
-    masks_in_path: Union[str, PathLike],  # at least the 1st frame
-    masks_out_path: Optional[Union[str, PathLike]] = None,
-    k: int = 5,
-    print_progress=True,
-    previously_chosen_candidates=[0],
-    use_previously_predicted_masks=True,
-    # Candidate selection hyperparameters
-    alpha=0.5,
-    min_mask_presence_percent=0.25,
-    **kwargs
-):
-    """
-    Selects the next best annotation candidate frames based on the provided frames and mask paths.
+# def select_k_next_best_annotation_candidates(
+#     imgs_in_path: Union[str, PathLike],
+#     masks_in_path: Union[str, PathLike],  # at least the 1st frame
+#     masks_out_path: Optional[Union[str, PathLike]] = None,
+#     k: int = 5,
+#     print_progress=True,
+#     previously_chosen_candidates=[0],
+#     use_previously_predicted_masks=True,
+#     # Candidate selection hyperparameters
+#     alpha=0.5,
+#     min_mask_presence_percent=0.25,
+#     **kwargs
+# ):
+#     """
+#     Selects the next best annotation candidate frames based on the provided frames and mask paths.
 
-    Parameters:
-        imgs_in_path (Union[str, PathLike]): The path to the directory containing input images.
-        masks_in_path (Union[str, PathLike]): The path to the directory containing the first frame masks.
-        masks_out_path (Optional[Union[str, PathLike]], optional): The path to save the generated masks.
-            If not provided, a temporary directory will be used. Defaults to None.
-        k (int, optional): The number of next best annotation candidate frames to select. Defaults to 5.
-        print_progress (bool, optional): Whether to print progress during processing. Defaults to True.
-        previously_chosen_candidates (list, optional): List of indices of frames with previously chosen candidates.
-            Defaults to [0].
-        use_previously_predicted_masks (bool, optional): Whether to use previously predicted masks.
-            If True, `masks_out_path` must be provided. Defaults to True.
-        alpha (float, optional): Hyperparameter controlling the candidate selection process. Defaults to 0.5.
-        min_mask_presence_percent (float, optional): Minimum mask presence percentage for candidate selection.
-            Defaults to 0.25.
-        **kwargs: Additional keyword arguments to pass to `run_on_video`.
+#     Parameters:
+#         imgs_in_path (Union[str, PathLike]): The path to the directory containing input images.
+#         masks_in_path (Union[str, PathLike]): The path to the directory containing the first frame masks.
+#         masks_out_path (Optional[Union[str, PathLike]], optional): The path to save the generated masks.
+#             If not provided, a temporary directory will be used. Defaults to None.
+#         k (int, optional): The number of next best annotation candidate frames to select. Defaults to 5.
+#         print_progress (bool, optional): Whether to print progress during processing. Defaults to True.
+#         previously_chosen_candidates (list, optional): List of indices of frames with previously chosen candidates.
+#             Defaults to [0].
+#         use_previously_predicted_masks (bool, optional): Whether to use previously predicted masks.
+#             If True, `masks_out_path` must be provided. Defaults to True.
+#         alpha (float, optional): Hyperparameter controlling the candidate selection process. Defaults to 0.5.
+#         min_mask_presence_percent (float, optional): Minimum mask presence percentage for candidate selection.
+#             Defaults to 0.25.
+#         **kwargs: Additional keyword arguments to pass to `run_on_video`.
 
-    Returns:
-        list: A list of indices representing the selected next best annotation candidate frames.
-    """
-    mapper, processor, vid_reader, loader = _load_main_objects(imgs_in_path, masks_in_path, VIDEO_INFERENCE_CONFIG)
+#     Returns:
+#         list: A list of indices representing the selected next best annotation candidate frames.
+#     """
+#     mapper, processor, vid_reader, loader = _load_main_objects(imgs_in_path, masks_in_path, VIDEO_INFERENCE_CONFIG)
 
-    # Extracting "key" feature maps
-    # Could be combined with inference (like in GUI), but the code would be a mess
-    frame_keys, shrinkages, selections, *_ = extract_keys(loader, processor, print_progress=print_progress, flatten=False)
-    # extracting the keys and corresponding matrices 
+#     # Extracting "key" feature maps
+#     # Could be combined with inference (like in GUI), but the code would be a mess
+#     frame_keys, shrinkages, selections, *_ = extract_keys(loader, processor, print_progress=print_progress, flatten=False)
+#     # extracting the keys and corresponding matrices 
 
-    to_tensor = ToTensor()
-    if masks_out_path is not None:
-        p_masks_out = Path(masks_out_path)
+#     to_tensor = ToTensor()
+#     if masks_out_path is not None:
+#         p_masks_out = Path(masks_out_path)
 
-    if use_previously_predicted_masks:
-        print("Using existing predicted masks, no need to run inference.")
-        assert masks_out_path is not None, "When `use_existing_masks=True`, you need to put the path to previously predicted masks in `masks_out_path`"
-        try:
-            masks = [to_tensor(Image.open(p)) for p in sorted((p_masks_out / 'masks').iterdir())]
-        except Exception as e:
-            warn("Loading previously predicting masks failed for `select_k_next_best_annotation_candidates`.")
-            raise e
-        if len(masks) != len(frame_keys):
-            raise FileNotFoundError(f"Not enough masks ({len(masks)}) for {len(frame_keys)} frames provided when using `use_previously_predicted_masks=True`!")
-    else:
-        print("Existing predictions were not given, will run full inference and save masks in `masks_out_path` or a temporary directory if `masks_out_path` is not given.")
-        if masks_out_path is None:
-            d = TemporaryDirectory()
-            p_masks_out = Path(d)
+#     if use_previously_predicted_masks:
+#         print("Using existing predicted masks, no need to run inference.")
+#         assert masks_out_path is not None, "When `use_existing_masks=True`, you need to put the path to previously predicted masks in `masks_out_path`"
+#         try:
+#             masks = [to_tensor(Image.open(p)) for p in sorted((p_masks_out / 'masks').iterdir())]
+#         except Exception as e:
+#             warn("Loading previously predicting masks failed for `select_k_next_best_annotation_candidates`.")
+#             raise e
+#         if len(masks) != len(frame_keys):
+#             raise FileNotFoundError(f"Not enough masks ({len(masks)}) for {len(frame_keys)} frames provided when using `use_previously_predicted_masks=True`!")
+#     else:
+#         print("Existing predictions were not given, will run full inference and save masks in `masks_out_path` or a temporary directory if `masks_out_path` is not given.")
+#         if masks_out_path is None:
+#             d = TemporaryDirectory()
+#             p_masks_out = Path(d)
         
-        # running inference once to obtain masks
-        run_on_video(
-            imgs_in_path=imgs_in_path,
-            masks_in_path=masks_in_path,  # Ignored
-            masks_out_path=p_masks_out,  # Used for some frame selectors
-            frames_with_masks=previously_chosen_candidates,
-            compute_iou=False,
-            print_progress=print_progress,
-            **kwargs
-        )
+#         # running inference once to obtain masks
+#         run_on_video(
+#             imgs_in_path=imgs_in_path,
+#             masks_in_path=masks_in_path,  # Ignored
+#             masks_out_path=p_masks_out,  # Used for some frame selectors
+#             frames_with_masks=previously_chosen_candidates,
+#             compute_iou=False,
+#             print_progress=print_progress,
+#             **kwargs
+#         )
 
-        masks = [to_tensor(Image.open(p)) for p in sorted((p_masks_out / 'masks').iterdir())]
+#         masks = [to_tensor(Image.open(p)) for p in sorted((p_masks_out / 'masks').iterdir())]
 
-    keys = torch.cat(frame_keys)
-    shrinkages = torch.cat(shrinkages)
-    selections = torch.cat(selections)
+    # keys = torch.cat(frame_keys)
+    # shrinkages = torch.cat(shrinkages)
+    # selections = torch.cat(selections)
 
-    new_selected_candidates = select_next_candidates(keys, shrinkages=shrinkages, selections=selections, masks=masks, num_next_candidates=k, previously_chosen_candidates=previously_chosen_candidates, print_progress=print_progress, alpha=alpha, only_new_candidates=True, min_mask_presence_percent=min_mask_presence_percent)
+    # new_selected_candidates = select_next_candidates(keys, shrinkages=shrinkages, selections=selections, masks=masks, num_next_candidates=k, previously_chosen_candidates=previously_chosen_candidates, print_progress=print_progress, alpha=alpha, only_new_candidates=True, min_mask_presence_percent=min_mask_presence_percent)
         
-    if masks_out_path is None:
-        # Remove the temporary directory
-        d.cleanup()
+    # if masks_out_path is None:
+    #     # Remove the temporary directory
+    #     d.cleanup()
 
-    return new_selected_candidates
+    # return new_selected_candidates

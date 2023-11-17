@@ -145,6 +145,8 @@ torchlogs/
 *junk*
 *.profile
 
+*.pth
+
 .DS_Store
 *.jpg
 *.zip
